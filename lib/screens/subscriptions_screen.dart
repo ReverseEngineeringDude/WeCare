@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:skeletonsplus/skeletonsplus.dart';
 import '../services/api_service.dart';
 import 'video_player_screen.dart';
 
@@ -124,7 +125,11 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return Skeleton(
+        isLoading: true,
+        skeleton: _buildSkeleton(),
+        child: const SizedBox.shrink(),
+      );
     }
     if (_error.isNotEmpty) {
       return Center(child: Text(_error));
@@ -139,71 +144,115 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       );
     }
 
+    return RefreshIndicator(
+      onRefresh: _loadSubscriptions,
+      child: GridView.builder(
+        padding: const EdgeInsets.all(8.0),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 8.0,
+          mainAxisSpacing: 8.0,
+          childAspectRatio: 0.75, // Adjust this ratio to your liking
+        ),
+        itemCount: _filteredSubscriptions.length,
+        itemBuilder: (context, i) {
+          final s = _filteredSubscriptions[i];
+          final title = s['title']?.toString() ?? 'Subscription';
+          final expiry = s['expiry_date']?.toString();
+          final imageUrl = s['thumnail_image']?.toString();
+          final url = s['video_url']?.toString();
+
+          return Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () {
+                if (url != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          VideoPlayerScreen(videoUrl: url, title: title),
+                    ),
+                  );
+                }
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: (imageUrl != null && imageUrl.isNotEmpty)
+                        ? Image.network(
+                            imageUrl,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                                  child: Icon(Icons.card_membership),
+                                ),
+                          )
+                        : const Center(child: Icon(Icons.card_membership)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(
+                      expiry != null ? 'Expires: $expiry' : 'No expiry date',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSkeleton() {
     return GridView.builder(
       padding: const EdgeInsets.all(8.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 8.0,
         mainAxisSpacing: 8.0,
-        childAspectRatio: 0.75, // Adjust this ratio to your liking
+        childAspectRatio: 0.75,
       ),
-      itemCount: _filteredSubscriptions.length,
+      itemCount: 8,
       itemBuilder: (context, i) {
-        final s = _filteredSubscriptions[i];
-        final title = s['title']?.toString() ?? 'Subscription';
-        final expiry = s['expiry_date']?.toString();
-        final imageUrl = s['thumnail_image']?.toString();
-        final url = s['video_url']?.toString();
-
-        return Card(
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () {
-              if (url != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        VideoPlayerScreen(videoUrl: url, title: title),
-                  ),
-                );
-              }
-            },
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: (imageUrl != null && imageUrl.isNotEmpty)
-                      ? Image.network(
-                          imageUrl,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Center(child: Icon(Icons.card_membership)),
-                        )
-                      : const Center(child: Icon(Icons.card_membership)),
+        return SkeletonItem(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(
+                child: SkeletonAvatar(
+                  style: SkeletonAvatarStyle(width: double.infinity),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+              ),
+              const SizedBox(height: 8),
+              SkeletonLine(
+                style: SkeletonLineStyle(
+                  height: 16,
+                  width: MediaQuery.of(context).size.width / 3,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                  child: Text(
-                    expiry != null ? 'Expires: $expiry' : 'No expiry date',
-                    style: Theme.of(context).textTheme.bodySmall,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
+              ),
+              const SizedBox(height: 4),
+              const SkeletonLine(
+                style: SkeletonLineStyle(height: 12, width: 64),
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
         );
       },
