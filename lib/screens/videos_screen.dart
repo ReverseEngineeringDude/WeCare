@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
-import 'video_player_screen.dart'; // we'll create this
+import 'video_player_screen.dart';
 
 class VideosScreen extends StatefulWidget {
   const VideosScreen({super.key});
@@ -13,76 +13,192 @@ class VideosScreen extends StatefulWidget {
 }
 
 class _VideosScreenState extends State<VideosScreen> {
-  late Future<Map<String, dynamic>> _future;
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _allVideos = [];
+  List<Map<String, dynamic>> _filteredVideos = [];
+  String _error = '';
 
-  Future<Map<String, dynamic>> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('useremail') ?? '';
-    return ApiService.regularVideos(email);
-  }
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearching = false;
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _loadVideos();
+    _searchController.addListener(_filterVideos);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_filterVideos);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadVideos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('useremail') ?? '';
+      final response = await ApiService.regularVideos(email);
+
+      if (mounted) {
+        if (response['statusCode'] == 200) {
+          final List items = (response['data']['result'] as List?) ?? [];
+          setState(() {
+            _allVideos = List<Map<String, dynamic>>.from(items);
+            _filteredVideos = _allVideos;
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _error = 'Failed to load videos (${response['statusCode']})';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'An error occurred: $e';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _filterVideos() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredVideos = _allVideos.where((video) {
+        final title = video['title']?.toString().toLowerCase() ?? '';
+        return title.contains(query);
+      }).toList();
+    });
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+      }
+    });
+  }
+
+  AppBar _buildAppBar() {
+    if (_isSearching) {
+      return AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _toggleSearch,
+        ),
+        title: TextField(
+          controller: _searchController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Search videos...',
+            border: InputBorder.none,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => _searchController.clear(),
+          ),
+        ],
+      );
+    } else {
+      return AppBar(
+        title: const Text('Regular Videos'),
+        actions: [
+          IconButton(icon: const Icon(Icons.search), onPressed: _toggleSearch),
+        ],
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Regular Videos')),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final status = snapshot.data!['statusCode'] as int;
-          final data = snapshot.data!['data'];
+    return Scaffold(appBar: _buildAppBar(), body: _buildBody());
+  }
 
-          if (status != 200) {
-            return Center(child: Text('Failed to load videos ($status)'));
-          }
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error.isNotEmpty) {
+      return Center(child: Text(_error));
+    }
+    if (_filteredVideos.isEmpty) {
+      return Center(
+        child: Text(_isSearching ? 'No videos found.' : 'No videos available.'),
+      );
+    }
 
-          // API returns {"result":[...]}
-          final List items = (data['result'] as List?) ?? [];
-
-          if (items.isEmpty) {
-            return const Center(child: Text('No videos found.'));
-          }
-
-          return ListView.separated(
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final v = items[i];
-              final title = v['title']?.toString() ?? 'Untitled';
-              final thumb = v['thumnail_image']?.toString();
-              final url = v['video_url']?.toString();
-
-              return ListTile(
-                leading: thumb != null
-                    ? Image.network(thumb, width: 60, fit: BoxFit.cover)
-                    : const Icon(Icons.play_circle_fill),
-                title: Text(title),
-                subtitle: Text(
-                  'Posted on ${v['postedon']} • Views: ${v['views']}',
-                ),
-                onTap: () {
-                  if (url != null) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            VideoPlayerScreen(videoUrl: url, title: title),
-                      ),
-                    );
-                  }
-                },
-              );
-            },
-          );
-        },
+    return GridView.builder(
+      padding: const EdgeInsets.all(8.0),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 8.0,
+        mainAxisSpacing: 8.0,
+        childAspectRatio: 0.75, // Adjust this ratio to your liking
       ),
+      itemCount: _filteredVideos.length,
+      itemBuilder: (context, i) {
+        final v = _filteredVideos[i];
+        final title = v['title']?.toString() ?? 'Untitled';
+        final thumb = v['thumnail_image']?.toString();
+        final url = v['video_url']?.toString();
+
+        return Card(
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () {
+              if (url != null) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        VideoPlayerScreen(videoUrl: url, title: title),
+                  ),
+                );
+              }
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: (thumb != null && thumb.isNotEmpty)
+                      ? Image.network(
+                          thumb,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Center(child: Icon(Icons.play_circle_fill)),
+                        )
+                      : const Center(child: Icon(Icons.play_circle_fill)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Text(
+                    'Views: ${v['views']}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
