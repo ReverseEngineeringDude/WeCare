@@ -139,12 +139,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildSectionHeader(context, 'General'),
               _buildSettingsTile(
                 context,
-                icon: Icons.notifications_outlined,
-                title: 'Notifications',
-                onTap: () {},
-              ),
-              _buildSettingsTile(
-                context,
                 icon: Icons.palette_outlined,
                 title: 'Appearance',
                 subtitle: themeProvider.themeModeName,
