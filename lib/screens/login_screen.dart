@@ -41,7 +41,11 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       setState(() {
-        error = 'Something went wrong. Please try again.';
+        if (e is SocketException) {
+          error = 'Network error. Please check your internet connection.';
+        } else {
+          error = 'An unexpected error occurred: $e';
+        }
       });
     } finally {
       setState(() {
