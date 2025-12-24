@@ -13,7 +13,6 @@ class ThemeProvider extends ChangeNotifier {
       case ThemeMode.dark:
         return 'Dark';
       case ThemeMode.system:
-      default:
         return 'System';
     }
   }

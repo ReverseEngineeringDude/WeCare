@@ -41,6 +41,11 @@ dependencies:
   provider: ^6.1.2
   native_device_orientation: ^1.1.5
   skeletonsplus: ^0.0.1
+  dio: ^5.9.0
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  ffmpeg_kit_flutter_new: ^4.1.0
+
 
 dev_dependencies:
   flutter_test:
@@ -53,6 +58,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
+  change_app_package_name: ^1.1.0
 
 flutter_launcher_icons:
   android: "launcher_icon"

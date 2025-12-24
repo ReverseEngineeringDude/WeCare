@@ -5,7 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = 'https://techmage.in/o/gofast/api';
+  // This will be updated dynamically based on the client selection
+  static String baseUrl = 'https://techmage.in/o/gofast/api';
+
+  /// Fetches client configuration by key (ClientId)
+  static Future<Map<String, dynamic>> getClientConfig(String clientId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('https://techmage.in/o/gofast/getclientbaseurl/getbykey'),
+        headers: {'clientkey': clientId.trim()},
+      );
+      return _parseResponse(res);
+    } catch (e) {
+      return {
+        'statusCode': 500,
+        'data': {'error': e.toString()},
+      };
+    }
+  }
 
   static Future<Map<String, dynamic>> login({
     required String email,

@@ -1,7 +1,7 @@
-# WeCare Academy
+# TechMage Academy
 
 <p align="center">
-  <img src="assets/images/logo.png" alt="WeCare Academy Logo" width="200"/>
+  <img src="assets/images/logo.png" alt="TechMage Academy Logo" width="200"/>
 </p>
 
 <p align="center">
