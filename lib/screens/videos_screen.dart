@@ -36,13 +36,11 @@ class _VideosScreenState extends State<VideosScreen> {
 
   @override
   void dispose() {
-    _searchController.removeListener(_filterSubscriptions);
+    // Corrected the listener removal to match the actual method name
+    _searchController.removeListener(_filterVideos);
     _searchController.dispose();
     super.dispose();
   }
-
-  // To fix the error in dispose provided in your snippet
-  void _filterSubscriptions() {} 
 
   String _getVideoKey(Map<String, dynamic> video) {
     return video['id']?.toString() ?? video['video_url']?.toString() ?? 'unknown';
@@ -60,6 +58,7 @@ class _VideosScreenState extends State<VideosScreen> {
           final now = DateTime.now();
           final format = DateFormat('MMMM d, yyyy hh:mm a');
           
+          // 1. Filter out expired videos
           final validVideos = items.where((video) {
             final expiryDateString = video['expiry_date'] as String?;
             if (expiryDateString == null || expiryDateString.isEmpty) {
@@ -73,6 +72,13 @@ class _VideosScreenState extends State<VideosScreen> {
               return true;
             }
           }).toList();
+
+          // 2. SORT ALPHABETICALLY BY TITLE
+          validVideos.sort((a, b) {
+            final String titleA = (a['title'] ?? '').toString().toLowerCase();
+            final String titleB = (b['title'] ?? '').toString().toLowerCase();
+            return titleA.compareTo(titleB);
+          });
 
           setState(() {
             _allVideos = List<Map<String, dynamic>>.from(validVideos);
@@ -251,7 +257,6 @@ class _VideosScreenState extends State<VideosScreen> {
                 ),
               ),
               
-              // Download Progress Overlay
               Positioned(
                 top: 8,
                 right: 8,
@@ -299,7 +304,6 @@ class _VideosScreenState extends State<VideosScreen> {
                 ),
               ),
 
-              // Expiry Date Badge
               if (expiry != null && expiry.isNotEmpty)
                 Positioned(
                   bottom: 8,

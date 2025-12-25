@@ -90,6 +90,13 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
           }
         }
 
+        // 3. SORT ALPHABETICALLY BY TITLE
+        items.sort((a, b) {
+          final String titleA = (a['title'] ?? '').toString().toLowerCase();
+          final String titleB = (b['title'] ?? '').toString().toLowerCase();
+          return titleA.compareTo(titleB);
+        });
+
         // Refresh provider state after potential cleanup
         if (mounted) {
           context.read<DownloadProvider>().refreshDownloads();
@@ -164,7 +171,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                 autofocus: true,
                 style: const TextStyle(fontSize: 15),
                 decoration: const InputDecoration(
-                  hintText: 'Search library...',
+                  hintText: 'Search subscriptions...',
                   border: InputBorder.none,
                   prefixIcon: Icon(Icons.search, size: 20),
                   contentPadding: EdgeInsets.symmetric(vertical: 10),
@@ -230,18 +237,15 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     final videoKey = _getVideoKey(s);
     final progress = downloadProvider.downloadProgress[videoKey];
 
-    // FIXED BUG: prioritized ID check to prevent same-URL testing collisions
+    // prioritized ID check to prevent same-URL testing collisions
     final isDownloaded = downloadProvider.downloads.any((v) {
       final downloadedId = v['id']?.toString();
       final currentId = s['id']?.toString();
 
-      // If we have unique IDs, they MUST match. This stops different videos
-      // with the same URL from looking like they are all downloaded.
       if (downloadedId != null && currentId != null) {
         return downloadedId == currentId;
       }
 
-      // Fallback to URL only if IDs are missing
       return v['video_url'] == url;
     });
 

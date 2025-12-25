@@ -96,15 +96,34 @@ class ApiService {
     }
   }
 
-  /// Internal helper specifically for video list responses
+  /// Internal helper specifically for video list responses.
+  /// Automatically fixes .html extensions to .m3u8.
   static Map<String, dynamic> _parseVideosResponse(http.Response res) {
     try {
       dynamic data = jsonDecode(res.body.isEmpty ? '{}' : res.body);
-      // Ensure the result is wrapped correctly for the UI
+      
+      List results = [];
       if (data is List) {
-        data = <String, dynamic>{'result': data};
+        results = data;
+      } else if (data is Map && data.containsKey('result')) {
+        results = data['result'] as List;
       }
-      return {'statusCode': res.statusCode, 'data': data};
+
+      // Standardize URLs: Replace .html with .m3u8 if found at the end of the URL
+      for (var item in results) {
+        if (item is Map && item.containsKey('video_url')) {
+          String url = item['video_url']?.toString() ?? '';
+          if (url.toLowerCase().endsWith('.html')) {
+            // Replaces the .html extension with .m3u8
+            item['video_url'] = url.replaceAll(RegExp(r'\.html$', caseSensitive: false), '.m3u8');
+          }
+        }
+      }
+
+      return {
+        'statusCode': res.statusCode, 
+        'data': {'result': results}
+      };
     } catch (e) {
       return {
         'statusCode': 500,

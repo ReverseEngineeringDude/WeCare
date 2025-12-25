@@ -287,7 +287,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     const SizedBox(height: 12),
                     Text(
-                      'v1.0.4 • Powered by ${_clientName ?? 'GoFast'}',
+                      'v1.0.4 • Powered by ${_clientName ?? 'Techmage'}',
                       style: TextStyle(
                         color: Colors.grey.withOpacity(0.6),
                         fontSize: 11,
