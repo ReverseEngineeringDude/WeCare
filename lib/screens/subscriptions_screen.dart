@@ -172,7 +172,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               ),
             )
           : const Text(
-              'My Library',
+              'Subscriptions',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 28,

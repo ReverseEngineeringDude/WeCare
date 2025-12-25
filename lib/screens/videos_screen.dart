@@ -1,3 +1,6 @@
+// ignore_for_file: unnecessary_underscores
+
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:skeletonsplus/skeletonsplus.dart';
 import '../providers/download_provider.dart';
 import '../services/api_service.dart';
+import '../services/download_service.dart';
 import 'video_player_screen.dart';
 
 class VideosScreen extends StatefulWidget {
@@ -32,10 +36,13 @@ class _VideosScreenState extends State<VideosScreen> {
 
   @override
   void dispose() {
-    _searchController.removeListener(_filterVideos);
+    _searchController.removeListener(_filterSubscriptions);
     _searchController.dispose();
     super.dispose();
   }
+
+  // To fix the error in dispose provided in your snippet
+  void _filterSubscriptions() {} 
 
   String _getVideoKey(Map<String, dynamic> video) {
     return video['id']?.toString() ?? video['video_url']?.toString() ?? 'unknown';
@@ -52,22 +59,21 @@ class _VideosScreenState extends State<VideosScreen> {
           final List items = (response['data']['result'] as List?) ?? [];
           final now = DateTime.now();
           final format = DateFormat('MMMM d, yyyy hh:mm a');
+          
           final validVideos = items.where((video) {
             final expiryDateString = video['expiry_date'] as String?;
             if (expiryDateString == null || expiryDateString.isEmpty) {
               return true; 
             }
             try {
-              final sanitizedDateString =
-                  expiryDateString.replaceAll(RegExp(r'\s+'), ' ');
+              final sanitizedDateString = expiryDateString.replaceAll(RegExp(r'\s+'), ' ');
               final expiryDate = format.parse(sanitizedDateString);
               return expiryDate.isAfter(now);
             } catch (e) {
-              // ignore: avoid_print
-              print('Error parsing expiry date "$expiryDateString": $e');
               return true;
             }
           }).toList();
+
           setState(() {
             _allVideos = List<Map<String, dynamic>>.from(validVideos);
             _filteredVideos = _allVideos;
@@ -116,6 +122,7 @@ class _VideosScreenState extends State<VideosScreen> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -145,7 +152,7 @@ class _VideosScreenState extends State<VideosScreen> {
               ),
             )
           : const Text(
-              'Discover',
+              'Regular Videos',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 28,
@@ -187,8 +194,7 @@ class _VideosScreenState extends State<VideosScreen> {
           childAspectRatio: 0.72,
         ),
         itemCount: _filteredVideos.length,
-        itemBuilder: (context, i) =>
-            _buildModernVideoItem(_filteredVideos[i]),
+        itemBuilder: (context, i) => _buildModernVideoItem(_filteredVideos[i]),
       ),
     );
   }
@@ -197,6 +203,7 @@ class _VideosScreenState extends State<VideosScreen> {
     final title = video['title']?.toString() ?? 'Video';
     final imageUrl = video['thumnail_image']?.toString();
     final url = video['video_url']?.toString();
+    final expiry = video['expiry_date']?.toString();
 
     final downloadProvider = Provider.of<DownloadProvider>(context);
     final videoKey = _getVideoKey(video);
@@ -209,13 +216,15 @@ class _VideosScreenState extends State<VideosScreen> {
           child: Stack(
             children: [
               GestureDetector(
-                onTap: () {
+                onTap: () async {
                   if (url != null) {
+                    final localPath = await DownloadService.getLocalPath(url, videoId: video['id']?.toString());
+                    if (!mounted) return;
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) =>
-                            VideoPlayerScreen(videoUrl: url, title: title),
+                            VideoPlayerScreen(videoUrl: url, title: title, localPath: localPath),
                       ),
                     );
                   }
@@ -241,6 +250,8 @@ class _VideosScreenState extends State<VideosScreen> {
                       : null,
                 ),
               ),
+              
+              // Download Progress Overlay
               Positioned(
                 top: 8,
                 right: 8,
@@ -273,15 +284,6 @@ class _VideosScreenState extends State<VideosScreen> {
                               backgroundColor: Colors.white24,
                             ),
                           ),
-                        if (progress != null && progress < 2.0)
-                          Text(
-                            '${(progress * 100).toInt()}%',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 8,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
                         Icon(
                           progress == null
                             ? Icons.download_rounded
@@ -296,6 +298,35 @@ class _VideosScreenState extends State<VideosScreen> {
                   ),
                 ),
               ),
+
+              // Expiry Date Badge
+              if (expiry != null && expiry.isNotEmpty)
+                Positioned(
+                  bottom: 8,
+                  left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha((255 * 0.7).round()),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.timer_outlined, color: Colors.orangeAccent, size: 10),
+                        const SizedBox(width: 4),
+                        Text(
+                          expiry,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -321,11 +352,7 @@ class _VideosScreenState extends State<VideosScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.error_outline_rounded,
-            size: 60,
-            color: Colors.red.shade200,
-          ),
+          Icon(Icons.error_outline_rounded, size: 60, color: Colors.red.shade200),
           const SizedBox(height: 16),
           Text(_error, style: const TextStyle(color: Colors.grey)),
           const SizedBox(height: 16),
@@ -340,16 +367,10 @@ class _VideosScreenState extends State<VideosScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.video_library_rounded,
-            size: 60,
-            color: Colors.grey.shade300,
-          ),
+          Icon(Icons.video_library_rounded, size: 60, color: Colors.grey.shade300),
           const SizedBox(height: 16),
-          Text(
-            _isSearching ? 'No matches found' : 'No videos available',
-            style: const TextStyle(color: Colors.grey, fontSize: 16),
-          ),
+          Text(_isSearching ? 'No matches found' : 'No videos available',
+            style: const TextStyle(color: Colors.grey, fontSize: 16)),
         ],
       ),
     );
@@ -369,29 +390,11 @@ class _VideosScreenState extends State<VideosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: SkeletonAvatar(
-                style: SkeletonAvatarStyle(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-            ),
+            Expanded(child: SkeletonAvatar(style: SkeletonAvatarStyle(borderRadius: BorderRadius.circular(18)))),
             const SizedBox(height: 12),
-            SkeletonLine(
-              style: SkeletonLineStyle(
-                height: 16,
-                width: 100,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            SkeletonLine(style: SkeletonLineStyle(height: 16, width: 100, borderRadius: BorderRadius.circular(4))),
             const SizedBox(height: 6),
-            SkeletonLine(
-              style: SkeletonLineStyle(
-                height: 12,
-                width: 60,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
+            SkeletonLine(style: SkeletonLineStyle(height: 12, width: 60, borderRadius: BorderRadius.circular(4))),
           ],
         ),
       ),
