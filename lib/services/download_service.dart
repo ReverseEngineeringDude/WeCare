@@ -1,15 +1,29 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new/statistics.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
+import 'package:synchronized/synchronized.dart';
+import 'package:intl/intl.dart'; // Ensure 'intl' is added to your pubspec.yaml
 
 class DownloadService {
   static const String _key = 'downloaded_videos';
+  static final _lock = Lock();
 
-  // Get list of downloaded video metadata
+  /// Helper to get a unique identifier for the video data
+  static String _getId(Map<String, dynamic> video) {
+    return video['id']?.toString() ??
+        video['video_url']?.toString() ??
+        'unknown';
+  }
+
+  /// Get list of downloaded video metadata
   static Future<List<Map<String, dynamic>>> getDownloadedVideos() async {
     final prefs = await SharedPreferences.getInstance();
     final String? data = prefs.getString(_key);
@@ -21,11 +35,17 @@ class DownloadService {
     }
   }
 
-  // Check if a video is already downloaded and return valid path
-  static Future<String?> getLocalPath(String videoUrl) async {
+  /// Check if a video is already downloaded and return valid path
+  static Future<String?> getLocalPath(
+    String videoUrl, {
+    String? videoId,
+  }) async {
     final downloads = await getDownloadedVideos();
+    final targetId = videoId ?? videoUrl;
+
     for (var video in downloads) {
-      if (video['video_url'] == videoUrl) {
+      final currentId = _getId(video);
+      if (currentId == targetId || video['video_url'] == videoUrl) {
         final path = video['local_path'];
         if (path != null && await File(path).exists()) {
           return path;
@@ -35,99 +55,138 @@ class DownloadService {
     return null;
   }
 
-  /// Downloads and converts M3U8 to MP4 using FFmpegKit
+  /// Helper to parse the API's custom date format (e.g., "November  29, 2026 12:00 PM")
+  static DateTime? parseExpiryDate(String? dateStr) {
+    if (dateStr == null || dateStr.trim().isEmpty) return null;
+    try {
+      // API often sends double spaces (e.g., "November  29").
+      // We normalize to single spaces for the DateFormat to work reliably.
+      final normalized = dateStr.replaceAll(RegExp(r'\s+'), ' ').trim();
+      // Format: Month Day, Year Hour:Minute AM/PM
+      return DateFormat("MMMM d, yyyy h:mm a").parse(normalized);
+    } catch (e) {
+      debugPrint("Date Parsing Error: $e");
+      return null;
+    }
+  }
+
+  /// Get media duration using ffprobe
+  static Future<double> _getMediaDuration(String mediaPath) async {
+    try {
+      final session = await FFprobeKit.getMediaInformation(mediaPath);
+      final information = session.getMediaInformation();
+      if (information == null) return 0.0;
+
+      final durationStr = information.getDuration();
+      return double.tryParse(durationStr ?? '0') ?? 0.0;
+    } catch (e) {
+      debugPrint("FFprobe error: $e");
+      return 0.0;
+    }
+  }
+
+  /// Downloads and converts M3U8 to MP4 using FFmpegKit with progress
   static Future<void> downloadVideo(
     Map<String, dynamic> videoData,
     Function(double) onProgress,
   ) async {
     final String videoUrl = videoData['video_url'];
+    final String videoId = _getId(videoData);
     final appDir = await getApplicationDocumentsDirectory();
 
-    // Create a unique filename for the MP4
-    final fileName = "video_${DateTime.now().millisecondsSinceEpoch}.mp4";
+    // Create unique filename based on ID
+    final fileName = "video_$videoId.mp4";
     final savePath = p.join(appDir.path, fileName);
 
-    // FFmpeg command to download and remux/convert to MP4
-    // -y: overwrite output file if exists
-    // -i: input url
-    // -c copy: copy streams without re-encoding (fastest)
-    // -bsf:a aac_adtstoasc: fix bitstream for some m3u8 sources
+    // Get duration for progress calculation
+    final double duration = await _getMediaDuration(videoUrl);
+
+    // Command to remux/convert
     final String command =
         "-y -i \"$videoUrl\" -c copy -bsf:a aac_adtstoasc \"$savePath\"";
 
+    final completer = Completer<void>();
+
     try {
-      // Initial progress feedback (FFmpeg start)
-      onProgress(0.1);
+      onProgress(0.01); // Signal start
 
-      // Execute FFmpeg
-      final session = await FFmpegKit.execute(command);
-      final returnCode = await session.getReturnCode();
+      await FFmpegKit.executeAsync(
+        command,
+        (session) async {
+          final returnCode = await session.getReturnCode();
 
-      if (ReturnCode.isSuccess(returnCode)) {
-        // Success
-        final downloads = await getDownloadedVideos();
+          if (ReturnCode.isSuccess(returnCode)) {
+            await _lock.synchronized(() async {
+              final prefs = await SharedPreferences.getInstance();
+              final downloads = await getDownloadedVideos();
 
-        // Prepare metadata for storage
-        final Map<String, dynamic> metadata = {
-          'title': videoData['title'],
-          'video_url': videoUrl,
-          'thumnail_image': videoData['thumnail_image'],
-          'local_path': savePath,
-          'downloaded_at': DateTime.now().toIso8601String(),
-        };
+              final metadata = {
+                'id': videoId,
+                'title': videoData['title'],
+                'video_url': videoUrl,
+                'thumnail_image': videoData['thumnail_image'],
+                'local_path': savePath,
+                'expiry_date':
+                    videoData['expiry_date'], // Save expiry string for later cleanup
+                'downloaded_at': DateTime.now().toIso8601String(),
+              };
 
-        // Avoid duplicates in the list
-        downloads.removeWhere((item) => item['video_url'] == videoUrl);
-        downloads.add(metadata);
+              // Overwrite existing record for this specific ID if it exists
+              downloads.removeWhere((item) => _getId(item) == videoId);
+              downloads.add(metadata);
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_key, jsonEncode(downloads));
-        onProgress(1.0);
-      } else if (ReturnCode.isCancel(returnCode)) {
-        throw Exception("Download was cancelled.");
-      } else {
-        final logs = await session.getLogs();
-        final lastLog = logs.isNotEmpty
-            ? logs.last.getMessage()
-            : "No details available";
-        throw Exception("FFmpeg conversion failed: $lastLog");
-      }
+              await prefs.setString(_key, jsonEncode(downloads));
+            });
+            onProgress(1.0);
+            completer.complete();
+          } else if (ReturnCode.isCancel(returnCode)) {
+            completer.completeError(Exception("Download cancelled"));
+          } else {
+            final logs = await session.getAllLogsAsString();
+            completer.completeError(Exception("FFmpeg failed: $logs"));
+          }
+        },
+        null, // Log callback
+        (Statistics stats) {
+          if (duration > 0) {
+            // getTime() returns ms of video processed, duration is in seconds
+            final double progress = stats.getTime() / (duration * 1000);
+            onProgress(progress.clamp(0.0, 0.99));
+          }
+        },
+      );
+
+      return completer.future;
     } catch (e) {
-      // Cleanup file if it exists but the process failed
+      // Cleanup file on failure
       final file = File(savePath);
       if (await file.exists()) {
-        try {
-          await file.delete();
-        } catch (_) {}
+        await file.delete().catchError((_) => file);
       }
       rethrow;
     }
   }
 
-  static Future<void> deleteVideo(String videoUrl) async {
-    final downloads = await getDownloadedVideos();
-    String? pathToDelete;
+  /// Deletes a video record and the physical file using localPath as the unique key.
+  /// This ensures that only the specific file is deleted, even if URLs are the same.
+  static Future<void> deleteVideo(String localPath) async {
+    await _lock.synchronized(() async {
+      final downloads = await getDownloadedVideos();
 
-    downloads.removeWhere((v) {
-      if (v['video_url'] == videoUrl) {
-        pathToDelete = v['local_path'];
-        return true;
-      }
-      return false;
-    });
+      // Find the specific record by its unique local path
+      downloads.removeWhere((v) => v['local_path'] == localPath);
 
-    if (pathToDelete != null) {
-      final file = File(pathToDelete!);
+      final file = File(localPath);
       if (await file.exists()) {
         try {
           await file.delete();
         } catch (e) {
-          // Log error but continue updating prefs
+          debugPrint("File deletion error: $e");
         }
       }
-    }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(downloads));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_key, jsonEncode(downloads));
+    });
   }
 }

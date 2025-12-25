@@ -1,11 +1,10 @@
-// ignore_for_file: deprecated_member_use
-
 import 'dart:async';
 import 'dart:io';
 
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_protector/screen_protector.dart'; // Updated package for better compatibility
 import 'package:native_device_orientation/native_device_orientation.dart';
 import 'package:video_player/video_player.dart';
 
@@ -34,12 +33,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _enableScreenSecurity(); // Enable restriction on entry
     _initializePlayer();
+  }
+
+  /// Restricts screen recording and screenshots using screen_protector.
+  /// preventScreenshotOn() handles both screenshots and screen recording on Android.
+  Future<void> _enableScreenSecurity() async {
+    try {
+      // Prevents screenshots and screen recording on Android and iOS
+      await ScreenProtector.preventScreenshotOn();
+    } catch (e) {
+      debugPrint("Security activation failed: $e");
+    }
+  }
+
+  /// Disables the restriction when exiting the player
+  Future<void> _disableScreenSecurity() async {
+    try {
+      // Re-allows screenshots and screen recording
+      await ScreenProtector.preventScreenshotOff();
+    } catch (e) {
+      debugPrint("Security deactivation failed: $e");
+    }
   }
 
   Future<void> _initializePlayer() async {
     try {
-      // Determine source: Local file takes priority if it exists
       if (widget.localPath != null && await File(widget.localPath!).exists()) {
         _videoPlayerController = VideoPlayerController.file(
           File(widget.localPath!),
@@ -60,8 +80,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         showControls: true,
         allowedScreenSleep: false,
         allowFullScreen: true,
-        deviceOrientationsAfterFullScreen: [DeviceOrientation.portraitUp],
-        // Premium progress colors
         materialProgressColors: ChewieProgressColors(
           playedColor: Colors.blueAccent,
           handleColor: Colors.blueAccent,
@@ -95,7 +113,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         },
       );
 
-      // Handle auto-rotation for full screen
       _orientationSubscription = NativeDeviceOrientationCommunicator()
           .onOrientationChanged(useSensor: true)
           .listen((event) {
@@ -127,10 +144,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _disableScreenSecurity(); // Disable restriction on exit
     _videoPlayerController?.dispose();
     _chewieController?.dispose();
     _orientationSubscription?.cancel();
-    // Revert to portrait when leaving the player
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
   }
@@ -199,7 +216,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
             ],
           ),
-          systemOverlayStyle: SystemUiOverlayStyle.light,
         ),
         body: Center(
           child: _isInitialized && _chewieController != null
@@ -207,21 +223,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   aspectRatio: _videoPlayerController!.value.aspectRatio,
                   child: Chewie(controller: _chewieController!),
                 )
-              : Column(
+              : const Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(
+                    CircularProgressIndicator(
                       color: Colors.blueAccent,
                       strokeWidth: 3,
                     ),
-                    const SizedBox(height: 24),
+                    SizedBox(height: 24),
                     Text(
-                      "Buffering your content...",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      "Securing your connection...",
+                      style: TextStyle(color: Colors.white60),
                     ),
                   ],
                 ),

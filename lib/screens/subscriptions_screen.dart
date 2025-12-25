@@ -1,8 +1,10 @@
-// ignore_for_file: unnecessary_underscores, deprecated_member_use
+// ignore_for_file: unnecessary_underscores
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:skeletonsplus/skeletonsplus.dart';
+import '../providers/download_provider.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
 import 'video_player_screen.dart';
@@ -19,9 +21,6 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   List<Map<String, dynamic>> _allSubscriptions = [];
   List<Map<String, dynamic>> _filteredSubscriptions = [];
   String _error = '';
-
-  // Track download progress for specific videos using a unique key
-  final Map<String, double> _downloadProgress = {};
 
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
@@ -40,7 +39,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     super.dispose();
   }
 
-  // Helper to get a unique identifier for a video
+  /// Helper to generate a unique key for tracking
   String _getVideoKey(Map<String, dynamic> video) {
     return video['id']?.toString() ??
         video['video_url']?.toString() ??
@@ -53,40 +52,64 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       final email = prefs.getString('useremail') ?? '';
       final response = await ApiService.subscriptions(email);
 
-      if (mounted) {
-        if (response['statusCode'] == 200) {
-          final List items = (response['data']['result'] as List?) ?? [];
+      if (mounted && response['statusCode'] == 200) {
+        final List items = (response['data']['result'] as List?) ?? [];
 
-          // Cleanup logic for expired downloads
-          final downloadedVideos = await DownloadService.getDownloadedVideos();
-          final activeSubscriptionUrls = items
-              .map((sub) => sub['video_url'])
-              .toList();
+        // --- AUTO-CLEANUP LOGIC ---
+        // Verify local files against expiry dates and current active subscriptions
+        final downloadedVideos = await DownloadService.getDownloadedVideos();
+        final now = DateTime.now();
+        final activeIds = items.map((s) => s['id']?.toString()).toSet();
 
-          for (var video in downloadedVideos) {
-            final videoUrl = video['video_url'];
-            if (!activeSubscriptionUrls.contains(videoUrl)) {
-              await DownloadService.deleteVideo(videoUrl);
+        for (var video in downloadedVideos) {
+          final localPath = video['local_path'] ?? '';
+          final videoId = video['id']?.toString();
+          final expiryStr = video['expiry_date'];
+
+          bool shouldDelete = false;
+
+          // 1. Delete if expired
+          if (expiryStr != null) {
+            final expiryDate = DownloadService.parseExpiryDate(expiryStr);
+            if (expiryDate != null && now.isAfter(expiryDate)) {
+              shouldDelete = true;
             }
           }
 
-          setState(() {
-            _allSubscriptions = List<Map<String, dynamic>>.from(items);
-            _filteredSubscriptions = _allSubscriptions;
-            _isLoading = false;
-          });
-        } else {
-          setState(() {
-            _error =
-                'Failed to load library content (${response['statusCode']})';
-            _isLoading = false;
-          });
+          // 2. Delete if no longer in the subscription list (access revoked)
+          // We only perform this check if the video has a valid ID
+          if (!shouldDelete &&
+              videoId != null &&
+              videoId != 'unknown' &&
+              !activeIds.contains(videoId)) {
+            shouldDelete = true;
+          }
+
+          if (shouldDelete && localPath.isNotEmpty) {
+            await DownloadService.deleteVideo(localPath);
+          }
         }
+
+        // Refresh provider state after potential cleanup
+        if (mounted) {
+          context.read<DownloadProvider>().refreshDownloads();
+        }
+
+        setState(() {
+          _allSubscriptions = List<Map<String, dynamic>>.from(items);
+          _filteredSubscriptions = _allSubscriptions;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Failed to load library content';
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Network error. Please check your connection.';
+          _error = 'Network error. Please try again.';
           _isLoading = false;
         });
       }
@@ -112,32 +135,12 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     });
   }
 
-  Future<void> _downloadVideo(Map<String, dynamic> videoData) async {
-    final url = videoData['video_url'];
-    final videoKey = _getVideoKey(videoData);
-
-    if (url == null) return;
-
-    try {
-      await DownloadService.downloadVideo(videoData, (progress) {
-        setState(() {
-          _downloadProgress[videoKey] = progress;
-        });
-      });
-      setState(() => _downloadProgress.remove(videoKey));
-      _showSnackBar('${videoData['title']} added to offline!');
-    } catch (e) {
-      setState(() => _downloadProgress.remove(videoKey));
-      _showSnackBar('Download failed: $e');
-    }
-  }
-
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
         duration: const Duration(seconds: 2),
       ),
@@ -148,23 +151,22 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     return AppBar(
       elevation: 0,
       centerTitle: false,
-      backgroundColor: Colors.transparent,
-      surfaceTintColor: Colors.transparent,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       title: _isSearching
           ? Container(
               height: 45,
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(14),
+                color: Colors.grey.withAlpha((255 * 0.1).round()),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: TextField(
                 controller: _searchController,
                 autofocus: true,
                 style: const TextStyle(fontSize: 15),
                 decoration: const InputDecoration(
-                  hintText: 'Search your library...',
+                  hintText: 'Search library...',
                   border: InputBorder.none,
-                  prefixIcon: Icon(Icons.search_rounded, size: 20),
+                  prefixIcon: Icon(Icons.search, size: 20),
                   contentPadding: EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
@@ -178,18 +180,14 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
               ),
             ),
       actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 8.0),
-          child: IconButton(
-            onPressed: _toggleSearch,
-            icon: Icon(
-              _isSearching ? Icons.close_rounded : Icons.search_rounded,
-            ),
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.grey.withOpacity(0.1),
-            ),
+        IconButton(
+          onPressed: _toggleSearch,
+          icon: Icon(_isSearching ? Icons.close_rounded : Icons.search_rounded),
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.grey.withAlpha((255 * 0.1).round()),
           ),
         ),
+        const SizedBox(width: 16),
       ],
     );
   }
@@ -207,13 +205,12 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     return RefreshIndicator(
       onRefresh: _loadSubscriptions,
       strokeWidth: 3,
-      displacement: 20,
       child: GridView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.all(16),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16,
-          mainAxisSpacing: 28,
+          mainAxisSpacing: 24,
           childAspectRatio: 0.72,
         ),
         itemCount: _filteredSubscriptions.length,
@@ -228,81 +225,97 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     final expiry = s['expiry_date']?.toString();
     final imageUrl = s['thumnail_image']?.toString();
     final url = s['video_url']?.toString();
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
+    final downloadProvider = Provider.of<DownloadProvider>(context);
     final videoKey = _getVideoKey(s);
-    final progress = _downloadProgress[videoKey];
+    final progress = downloadProvider.downloadProgress[videoKey];
+
+    // FIXED BUG: prioritized ID check to prevent same-URL testing collisions
+    final isDownloaded = downloadProvider.downloads.any((v) {
+      final downloadedId = v['id']?.toString();
+      final currentId = s['id']?.toString();
+
+      // If we have unique IDs, they MUST match. This stops different videos
+      // with the same URL from looking like they are all downloaded.
+      if (downloadedId != null && currentId != null) {
+        return downloadedId == currentId;
+      }
+
+      // Fallback to URL only if IDs are missing
+      return v['video_url'] == url;
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Premium Media Container
         Expanded(
           child: Stack(
             children: [
               GestureDetector(
-                onTap: () {
+                onTap: () async {
                   if (url != null) {
+                    final localPath = await DownloadService.getLocalPath(
+                      url,
+                      videoId: s['id']?.toString(),
+                    );
+                    if (!mounted) return;
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            VideoPlayerScreen(videoUrl: url, title: title),
+                        builder: (context) => VideoPlayerScreen(
+                          videoUrl: url,
+                          title: title,
+                          localPath: localPath,
+                        ),
                       ),
                     );
                   }
                 },
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 15,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                    borderRadius: BorderRadius.circular(18),
                     image: (imageUrl != null && imageUrl.isNotEmpty)
                         ? DecorationImage(
                             image: NetworkImage(imageUrl),
                             fit: BoxFit.cover,
                           )
                         : null,
-                    color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                    color: Colors.grey.shade200,
                   ),
                   child: (imageUrl == null || imageUrl.isEmpty)
                       ? const Center(
                           child: Icon(
-                            Icons.card_membership_rounded,
+                            Icons.card_membership,
                             color: Colors.grey,
-                            size: 40,
                           ),
                         )
                       : null,
                 ),
               ),
-
-              // Glass-morphic Download Action
               Positioned(
-                top: 10,
-                right: 10,
+                top: 8,
+                right: 8,
                 child: GestureDetector(
-                  onTap: progress != null ? null : () => _downloadVideo(s),
+                  onTap: (progress != null || isDownloaded)
+                      ? null
+                      : () {
+                          downloadProvider.startDownload(s);
+                          _showSnackBar('Download started for $title');
+                        },
                   child: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.4),
+                      color: Colors.black.withAlpha((255 * 0.4).round()),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.2),
+                        color: Colors.white.withAlpha((255 * 0.2).round()),
                         width: 1,
                       ),
                     ),
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
-                        if (progress != null)
+                        if (progress != null && progress < 2.0)
                           SizedBox(
                             width: 24,
                             height: 24,
@@ -313,62 +326,59 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                               backgroundColor: Colors.white24,
                             ),
                           ),
+                        if (progress != null && progress < 2.0)
+                          Text(
+                            '${(progress * 100).toInt()}%',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         Icon(
-                          progress != null
-                              ? Icons.hourglass_empty_rounded
-                              : Icons.arrow_downward_rounded,
+                          isDownloaded || progress == 2.0
+                              ? Icons.check_circle_rounded
+                              : progress == null
+                              ? Icons.download_rounded
+                              : Icons.hourglass_top_rounded,
                           size: 16,
-                          color: Colors.white,
+                          color: isDownloaded || progress == 2.0
+                              ? Colors.greenAccent
+                              : Colors.white,
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-
-              // Refined Expiry Badge
               if (expiry != null)
                 Positioned(
-                  bottom: 10,
-                  left: 10,
+                  bottom: 8,
+                  right: 8,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+                      horizontal: 6,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      color: Colors.black.withAlpha((255 * 0.6).round()),
+                      borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.timer_outlined,
-                          color: Colors.white70,
-                          size: 10,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          expiry,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      expiry,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
             ],
           ),
         ),
-
-        // Polished Metadata Area
         Padding(
-          padding: const EdgeInsets.only(top: 12, left: 6),
+          padding: const EdgeInsets.only(top: 10, left: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -377,43 +387,19 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                  letterSpacing: -0.4,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  letterSpacing: -0.2,
                 ),
               ),
-              const SizedBox(height: 3),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.primaryColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'PREMIUM',
-                      style: TextStyle(
-                        color: theme.primaryColor,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Full Access',
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 2),
+              Text(
+                'Premium Access',
+                style: TextStyle(
+                  color: Theme.of(context).primaryColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -427,36 +413,15 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.red.withOpacity(0.05),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.cloud_off_rounded,
-              size: 48,
-              color: Colors.red.shade300,
-            ),
+          Icon(
+            Icons.error_outline_rounded,
+            size: 60,
+            color: Colors.red.shade200,
           ),
-          const SizedBox(height: 20),
-          Text(
-            _error,
-            style: const TextStyle(
-              color: Colors.grey,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _loadSubscriptions,
-            style: ElevatedButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Try Again'),
-          ),
+          const SizedBox(height: 16),
+          Text(_error, style: const TextStyle(color: Colors.grey)),
+          const SizedBox(height: 16),
+          TextButton(onPressed: _loadSubscriptions, child: const Text('Retry')),
         ],
       ),
     );
@@ -468,18 +433,14 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.video_collection_outlined,
-            size: 80,
-            color: Colors.grey.shade200,
+            Icons.auto_awesome_motion_rounded,
+            size: 60,
+            color: Colors.grey.shade300,
           ),
           const SizedBox(height: 16),
           Text(
-            _isSearching ? 'No matching content' : 'Your library is empty',
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+            _isSearching ? 'No matches found' : 'No active subscriptions',
+            style: const TextStyle(color: Colors.grey, fontSize: 16),
           ),
         ],
       ),
@@ -492,7 +453,7 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 16,
-        mainAxisSpacing: 28,
+        mainAxisSpacing: 24,
         childAspectRatio: 0.72,
       ),
       itemCount: 6,
@@ -503,24 +464,24 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
             Expanded(
               child: SkeletonAvatar(
                 style: SkeletonAvatarStyle(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(18),
                 ),
               ),
             ),
             const SizedBox(height: 12),
             SkeletonLine(
               style: SkeletonLineStyle(
-                height: 18,
-                width: 120,
-                borderRadius: BorderRadius.circular(6),
+                height: 16,
+                width: 100,
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
             const SizedBox(height: 6),
             SkeletonLine(
               style: SkeletonLineStyle(
                 height: 12,
-                width: 80,
-                borderRadius: BorderRadius.circular(6),
+                width: 60,
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
           ],

@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
@@ -59,11 +60,26 @@ class _ClientSelectionScreenState extends State<ClientSelectionScreen> {
         }
       } else {
         setState(
-          () => _errorMessage = "Connection error (${res['statusCode']})",
+          () => _errorMessage =
+              "Server error (${res['statusCode']}). Please contact support.",
         );
       }
+    } on SocketException {
+      setState(
+        () => _errorMessage =
+            "No internet connection. Please check your network.",
+      );
+    } on FormatException {
+      setState(
+        () => _errorMessage = "Invalid response from server. Please try again.",
+      );
     } catch (e) {
-      setState(() => _errorMessage = "Something went wrong. Please try again.");
+      // General error fallback
+      setState(
+        () => _errorMessage =
+            "Connection failed. Ensure Internet is enabled in Manifest.",
+      );
+      debugPrint("Setup Error: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -99,11 +115,11 @@ class _ClientSelectionScreenState extends State<ClientSelectionScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Modern Branding Container (Optimized for Rectangle)
+                    // Modern Branding Container
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 1,
-                        vertical: 1,
+                        horizontal: 24,
+                        vertical: 16,
                       ),
                       decoration: BoxDecoration(
                         color: isDark ? Colors.white10 : Colors.white,
@@ -120,23 +136,17 @@ class _ClientSelectionScreenState extends State<ClientSelectionScreen> {
                           width: 1,
                         ),
                       ),
-                      child: Image.asset(
-                        "assets/images/logo.png",
-                        height: 100, // Height fixed to keep consistency
-                        fit: BoxFit
-                            .contain, // Contain ensures the rectangle is fully visible
-                        errorBuilder: (context, error, stackTrace) => Icon(
-                          Icons.business_rounded,
-                          size: 60,
-                          color: theme.primaryColor,
-                        ),
+                      child: const Icon(
+                        Icons.business_rounded,
+                        size: 50,
+                        color: Colors.blueAccent,
                       ),
                     ),
 
                     const SizedBox(height: 32),
 
                     const Text(
-                      'Welcome to Techmage',
+                      'Environment Setup',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 28,
@@ -148,7 +158,7 @@ class _ClientSelectionScreenState extends State<ClientSelectionScreen> {
                     const SizedBox(height: 8),
 
                     Text(
-                      'Enter your organizational Client ID to set up your environment.',
+                      'Enter your organizational Client ID to continue.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.grey.shade600,
@@ -167,7 +177,6 @@ class _ClientSelectionScreenState extends State<ClientSelectionScreen> {
                         hintText: 'e.g. TECHMAGE',
                         prefixIcon: Icon(Icons.vpn_key_rounded, size: 22),
                       ),
-                      textCapitalization: TextCapitalization.characters,
                       onSubmitted: (_) => _fetchClientConfig(),
                     ),
 

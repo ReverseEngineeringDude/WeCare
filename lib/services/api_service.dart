@@ -1,83 +1,115 @@
-// ignore_for_file: unused_import
-
 import 'dart:convert';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // This will be updated dynamically based on the client selection
   static String baseUrl = 'https://techmage.in/o/gofast/api';
 
   /// Fetches client configuration by key (ClientId)
   static Future<Map<String, dynamic>> getClientConfig(String clientId) async {
     try {
-      final res = await http.get(
-        Uri.parse('https://techmage.in/o/gofast/getclientbaseurl/getbykey'),
-        headers: {'clientkey': clientId.trim()},
-      );
+      final res = await http
+          .get(
+            Uri.parse('https://techmage.in/o/gofast/getclientbaseurl/getbykey'),
+            headers: {'clientkey': clientId.trim()},
+          )
+          .timeout(const Duration(seconds: 10));
+
       return _parseResponse(res);
     } catch (e) {
       return {
         'statusCode': 500,
-        'data': {'error': e.toString()},
+        'data': {'error': 'Connection timed out or failed'},
       };
     }
   }
 
+  /// Handles user login
   static Future<Map<String, dynamic>> login({
     required String email,
     required String password,
   }) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/Auth'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
-    );
-    return _parseResponse(res);
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/Auth'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 15));
+      return _parseResponse(res);
+    } catch (e) {
+      return {
+        'statusCode': 500,
+        'data': {'error': 'Login request timed out'},
+      };
+    }
   }
 
+  /// Fetches regular videos for a specific user
   static Future<Map<String, dynamic>> regularVideos(String email) async {
-    final formattedEmail = email.trim().toUpperCase();
-    final res = await http.get(
-      Uri.parse('$baseUrl/regular_videos'),
-      headers: {'useremail': formattedEmail},
-    );
-    return _parseVideosResponse(res);
+    try {
+      final formattedEmail = email.trim().toUpperCase();
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/regular_videos'),
+            headers: {'useremail': formattedEmail},
+          )
+          .timeout(const Duration(seconds: 15));
+      return _parseVideosResponse(res);
+    } catch (e) {
+      return {
+        'statusCode': 500,
+        'data': {'error': 'Failed to load videos'},
+      };
+    }
   }
 
+  /// Fetches subscribed videos for a specific user
   static Future<Map<String, dynamic>> subscriptions(String email) async {
-    final formattedEmail = email.trim().toUpperCase();
-    final res = await http.get(
-      Uri.parse('$baseUrl/subscriptions'),
-      headers: {'useremail': formattedEmail},
-    );
-    return _parseVideosResponse(res);
+    try {
+      final formattedEmail = email.trim().toUpperCase();
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/subscriptions'),
+            headers: {'useremail': formattedEmail},
+          )
+          .timeout(const Duration(seconds: 15));
+      return _parseVideosResponse(res);
+    } catch (e) {
+      return {
+        'statusCode': 500,
+        'data': {'error': 'Failed to load library'},
+      };
+    }
   }
 
+  /// Internal helper to parse general JSON responses
   static Map<String, dynamic> _parseResponse(http.Response res) {
-    final body = res.body;
-    dynamic data;
     try {
-      data = jsonDecode(body.isEmpty ? '{}' : body);
+      final data = jsonDecode(res.body.isEmpty ? '{}' : res.body);
+      return {'statusCode': res.statusCode, 'data': data};
     } catch (e) {
-      data = {'error': 'Invalid response from server', 'body': body};
+      return {
+        'statusCode': 500,
+        'data': {'error': 'Server Error'},
+      };
     }
-    return {'statusCode': res.statusCode, 'data': data};
   }
 
+  /// Internal helper specifically for video list responses
   static Map<String, dynamic> _parseVideosResponse(http.Response res) {
-    final body = res.body;
-    dynamic data;
     try {
-      data = jsonDecode(body.isEmpty ? '{}' : body);
+      dynamic data = jsonDecode(res.body.isEmpty ? '{}' : res.body);
+      // Ensure the result is wrapped correctly for the UI
+      if (data is List) {
+        data = <String, dynamic>{'result': data};
+      }
+      return {'statusCode': res.statusCode, 'data': data};
     } catch (e) {
-      data = {'error': 'Invalid response from server', 'body': body};
+      return {
+        'statusCode': 500,
+        'data': {'error': 'Server Error'},
+      };
     }
-
-    if (data is List) {
-      data = <String, dynamic>{'result': data};
-    }
-
-    return {'statusCode': res.statusCode, 'data': data};
   }
 }

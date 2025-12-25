@@ -45,6 +45,10 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.1
   ffmpeg_kit_flutter_new: ^4.1.0
+  screen_protector: ^1.4.12
+  synchronized: ^3.4.0
+  intl: ^0.20.2
+  
 
 
 dev_dependencies:
